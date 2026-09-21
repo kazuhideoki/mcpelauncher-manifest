@@ -1,0 +1,75 @@
+--- a/game-window/src/joystick_manager_glfw.cpp
++++ b/game-window/src/joystick_manager_glfw.cpp
+@@ -296,8 +296,17 @@
+                     window->onGamepadAxis(nativeProbeId, GamepadAxisId::RIGHT_Y, -axis(p.rightThumbstick.yAxis.value));
+                 }
+                 if (!strcmp(nativeProbeMode, "full")) {
+-                    window->onGamepadAxis(nativeProbeId, GamepadAxisId::LEFT_TRIGGER, p.leftTrigger.value);
+-                    window->onGamepadAxis(nativeProbeId, GamepadAxisId::RIGHT_TRIGGER, p.rightTrigger.value);
++                    static float lastLeft = -999.f, lastRight = -999.f;
++                    float left = p.leftTrigger.value, right = p.rightTrigger.value;
++                    if (left != lastLeft || right != lastRight) {
++                        fprintf(stderr, "[TriggerDiagnostic] left=%g right=%g focused=%d\n", left, right, focusedWindow == window);
++                        lastLeft = left; lastRight = right;
++                    }
++                    const char* triggers = std::getenv("MCPELAUNCHER_DIAGNOSTIC_TRIGGERS");
++                    if (!triggers || strcmp(triggers, "right"))
++                        window->onGamepadAxis(nativeProbeId, GamepadAxisId::LEFT_TRIGGER, left);
++                    if (!triggers || strcmp(triggers, "left"))
++                        window->onGamepadAxis(nativeProbeId, GamepadAxisId::RIGHT_TRIGGER, right);
+                 }
+             }
+             if (!strcmp(nativeProbeMode, "neutral") && focusedWindow == window) {
+--- a/mcpelauncher-core/src/crash_handler.cpp
++++ b/mcpelauncher-core/src/crash_handler.cpp
+@@ -9,6 +9,37 @@
+ #include <mcpelauncher/linker.h>
+ #include <thread>
+
++
++
++#if defined(__APPLE__) && defined(__aarch64__)
++#include <sys/ucontext.h>
++#include <unistd.h>
++// Diagnostic-only: write the actual fault context before the legacy unwinder.
++static void faultHex(const char* key, unsigned long long value) {
++    char line[96]; unsigned n = 0;
++    while (*key) line[n++] = *key++;
++    line[n++] = '='; line[n++] = '0'; line[n++] = 'x';
++    for (int shift = 60; shift >= 0; shift -= 4)
++        line[n++] = "0123456789abcdef"[(value >> shift) & 15];
++    line[n++] = '\n';
++    write(STDERR_FILENO, line, n);
++}
++static void captureArmFault(int signal, siginfo_t* info, void* context) {
++    auto* uc = static_cast<ucontext_t*>(context);
++    auto& state = uc->uc_mcontext->__ss;
++    faultHex("FAULT_PC", state.__pc);
++    faultHex("FAULT_LR", state.__lr);
++    faultHex("FAULT_SP", state.__sp);
++    faultHex("FAULT_FP", state.__fp);
++    faultHex("FAULT_ADDRESS", reinterpret_cast<unsigned long long>(info->si_addr));
++    for (int i = 0; i < 29; ++i) {
++        char key[] = "FAULT_X00";
++        key[7] = '0' + i / 10; key[8] = '0' + i % 10;
++        faultHex(key, state.__x[i]);
++    }
++
++}
++#endif
+
+ bool CrashHandler::hasCrashed = false;
+
+@@ -102,6 +133,12 @@
+ #if defined(__x86_64__) && defined(__APPLE__)
+     act.sa_sigaction = (void (*)(int, __siginfo *, void *)) handle_fs_fault;
+     act.sa_flags = SA_SIGINFO;
++#elif defined(__APPLE__) && defined(__aarch64__)
++    act.sa_sigaction = [](int sig, siginfo_t* info, void* context) {
++        captureArmFault(sig, info, context);
++        handleSignal(sig, nullptr);
++    };
++    act.sa_flags = SA_SIGINFO;
+ #else
+     act.sa_handler = (void (*)(int)) handleSignal;
+     act.sa_flags = 0;
