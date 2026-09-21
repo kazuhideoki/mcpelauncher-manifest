@@ -1,0 +1,11 @@
+--- a/src/window_callbacks.cpp
++++ b/src/window_callbacks.cpp
+@@ -560,7 +560,7 @@
+         auto& gp = gpi->second;
+ 
+         GameActivityMotionEvent ev = {};
+-        ev.source = AINPUT_SOURCE_GAMEPAD;
++        ev.source = AINPUT_SOURCE_JOYSTICK;
+         ev.deviceId = gamepad;
+         ev.action = AMOTION_EVENT_ACTION_MOVE;
+         ev.pointerCount = 1;
