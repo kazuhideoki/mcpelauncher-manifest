@@ -44,7 +44,7 @@ def main():
     parser.add_argument('--jobs', type=int, default=10)
     args = parser.parse_args()
     source, dest = args.source.resolve(), args.destination.resolve()
-    lock = json.loads((HERE.parent / 'source_lock.json').read_text())
+    lock = json.loads((HERE / 'source_lock.json').read_text())
     if json.loads((source / 'joycon/source_lock.json').read_text()) != lock:
         parser.error('Source lock differs from the recorded baseline')
     if dest.exists() or source == dest or source in dest.parents:

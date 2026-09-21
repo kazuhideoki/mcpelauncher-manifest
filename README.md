@@ -1,6 +1,6 @@
 # Personal Joy-Con build
 
-See [joycon/README.md](joycon/README.md) for the pinned macOS build, controls, installation and recovery workflow. The upstream README follows.
+Run `./joycon/setup.sh` to build, install and select the native Joy-Con gamepad profile on Apple Silicon macOS. See [joycon/README.md](joycon/README.md) for prerequisites, controls and recovery. The upstream README follows.
 
 # mcpelauncher
 

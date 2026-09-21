@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and stage the pinned client; profile activation is a separate operation."""
+"""Set up the pinned native Joy-Con gamepad client with reversible activation."""
 import argparse
 import configparser
 import hashlib
@@ -63,7 +63,8 @@ def build(args):
         '-DBUILD_UI=OFF', '-DBUILD_WEBVIEW=OFF', '-DGAMEWINDOW_SYSTEM=GLFW',
         '-DUSE_OWN_CURL=OFF', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0',
         '-DCMAKE_EXE_LINKER_FLAGS=-framework AppKit', '-DENABLE_DEV_PATHS=OFF',
-        '-DSDL3_VENDORED=OFF', f'-DOPENSSL_ROOT_DIR={openssl}', f'-DSDL3_DIR={sdl}')
+        '-DSDL3_VENDORED=OFF', '-DUSE_GAMECONTROLLERDB=OFF',
+        f'-DOPENSSL_ROOT_DIR={openssl}', f'-DSDL3_DIR={sdl}')
     run('cmake', '--build', build_dir, '--target', 'mcpelauncher-client', '-j', args.jobs)
     binary = build_dir / 'mcpelauncher-client/mcpelauncher-client'
     report = {'source_lock': lock, 'manifest_commit': output('git', '-C', ROOT, 'rev-parse', 'HEAD'),
@@ -72,7 +73,8 @@ def build(args):
               'macos': output('sw_vers', '-productVersion'),
               'sdk': output('xcrun', '--show-sdk-version'),
               'openssl': str(openssl), 'sdl3_dir': str(sdl),
-              'runtime_tested': False}
+              'client_fix_sha256': digest(HERE / 'client_fix.cmake'),
+              'input_mode': 'native-gamepad', 'runtime_tested': False}
     (build_dir / 'joycon_build_report.json').write_text(json.dumps(report, indent=2) + '\n')
     print(f'Built {binary}; gameplay has not been tested by this command')
 
@@ -112,7 +114,7 @@ def profile(runtime, data_dir, mod):
     template = template.replace('@RUNTIME@', str(runtime)).replace('@DATA_DIR@', str(data_dir)).replace('@UPDATE_MOD@', str(mod))
     config = parser_ini()
     config.read_string(template)
-    return dict(config['Joy-Con-Keyboard'])
+    return dict(config['Joy-Con-Gamepad'])
 
 
 def package(args):
@@ -126,6 +128,8 @@ def package(args):
         raise ValueError('Binary differs from build report')
     if report['source_lock'] != json.loads((HERE / 'source_lock.json').read_text()):
         raise ValueError('Source lock changed since build; rebuild before packaging')
+    if report.get('client_fix_sha256') != digest(HERE / 'client_fix.cmake'):
+        raise ValueError('Client fix changed since build; rebuild before packaging')
     app = args.launcher_app.resolve() / 'Contents'
     mod = args.update_mod.resolve()
     data_dir = args.data_dir.expanduser().resolve()
@@ -153,7 +157,7 @@ def package(args):
     (dest / 'version_metadata').mkdir()
     shutil.copy2(HERE / 'templates/version_metadata.json', dest / 'version_metadata/mod.json')
     config = parser_ini()
-    config['Joy-Con-Keyboard'] = settings
+    config['Joy-Con-Gamepad'] = settings
     write_private(dest / 'profile.fragment.ini', serialize(config))
     shutil.copy2(args.build_dir / 'joycon_build_report.json', dest / 'build_report.json')
     licenses = dest / 'licenses'
@@ -169,21 +173,22 @@ def package(args):
 
 def apps_closed():
     names = output('ps', '-axo', 'comm=').splitlines()
-    if any(Path(name.strip()).name.startswith(('mcpelauncher-client', 'mcpelauncher_client', 'mcpelauncher-ui')) for name in names):
+    if any(Path(name.strip()).name.startswith(('mcpelauncher-client', 'mcpelauncher_', 'mcpelauncher-ui')) for name in names):
         raise ValueError('Save and close Minecraft AND the launcher first')
 
 
-def apply_profile(runtime, profiles_file, name):
+def apply_profile(runtime, profiles_file, name, expected_entry=None):
     if not name or any(c in name for c in '[]/\\\n\r') or name in ('General', 'Metadata', 'DEFAULT'):
         raise ValueError('Invalid profile name')
     profiles_file = profiles_file.resolve()
     config = parser_ini()
     config.read(profiles_file)
-    if name in config:
+    if name in config and (expected_entry is None or dict(config[name]) != expected_entry):
         raise ValueError('Profile already exists; choose a NEW profile name')
     fragment = parser_ini()
     fragment.read(runtime / 'profile.fragment.ini')
-    entry = dict(fragment['Joy-Con-Keyboard'])
+    section = 'Joy-Con-Gamepad' if 'Joy-Con-Gamepad' in fragment else 'Joy-Con-Keyboard'
+    entry = dict(fragment[section])
     if Path(entry['dataDir']).resolve() != profiles_file.parent.parent:
         raise ValueError('Profile dataDir must match the launcher data directory')
     receipts = runtime / 'profile_backups'
@@ -205,6 +210,73 @@ def apply_profile(runtime, profiles_file, name):
     return receipt_path
 
 
+def activate_managed(runtime, profiles_file, state_file, name='Joy-Con-Gamepad'):
+    """Update only the profile previously installed by this setup command."""
+    state = json.loads(state_file.read_text()) if state_file.exists() else None
+    config = parser_ini()
+    config.read(profiles_file)
+    fragment = parser_ini()
+    fragment.read(runtime / 'profile.fragment.ini')
+    entry = dict(fragment['Joy-Con-Gamepad'])
+    expected = None
+    if state:
+        if state['profiles_file'] != str(profiles_file.resolve()) or state['profile'] != name:
+            raise ValueError('Setup receipt belongs to another profile or launcher')
+        expected = state['entry']
+    if name in config:
+        if expected is None or dict(config[name]) != expected:
+            raise ValueError('Joy-Con-Gamepad was edited outside setup; preserving those changes')
+        if dict(config[name]) == entry and config.get('General', 'selected', fallback='') == name:
+            return Path(state['receipt'])
+    receipt = apply_profile(runtime, profiles_file, name, expected_entry=expected)
+    write_private(state_file, json.dumps({'profile': name, 'entry': entry,
+                  'profiles_file': str(profiles_file.resolve()), 'receipt': str(receipt)}, indent=2) + '\n')
+    return receipt
+
+
+def setup(args):
+    if sys.platform != 'darwin' or output('uname', '-m') != 'arm64':
+        raise ValueError('This setup requires Apple Silicon macOS')
+    args.data_dir = args.data_dir.expanduser().resolve()
+    args.launcher_app = args.launcher_app.expanduser().resolve()
+    args.update_mod = args.update_mod or args.data_dir / 'mods/mcpelauncher-updates/1.26.45.1/arm64-v8a'
+    required = [args.launcher_app / 'Contents/MacOS/mcpelauncher-ui-qt',
+                args.data_dir / 'versions/1.26.51.1/lib/arm64-v8a/libminecraftpe.so',
+                args.update_mod / 'libmcpelauncher-updates.so']
+    for path in required:
+        if not path.is_file():
+            raise ValueError(f'Install the launcher, purchased Minecraft 1.26.51.1 and update mod first: {path}')
+    lock = json.loads((HERE / 'source_lock.json').read_text())
+    missing = sorted({relative.split('/')[0] for relative in lock['submodules']
+                      if not (ROOT / relative / '.git').exists()})
+    if missing:
+        run('git', '-C', ROOT, 'submodule', 'update', '--init', '--recursive', '--', *missing)
+    build(args)
+    report_path = args.build_dir.resolve() / 'joycon_build_report.json'
+    recipe = {'report': digest(report_path), 'launcher': str(args.launcher_app),
+              'data': str(args.data_dir), 'mod': str(args.update_mod.resolve()),
+              'files': {name: digest(HERE / name) for name in
+                        ('launch_client.sh', 'templates/profile.ini.in', 'templates/version_metadata.json')}}
+    release = hashlib.sha256(json.dumps(recipe, sort_keys=True).encode()).hexdigest()[:20]
+    install_root = args.data_dir / 'joycon-gamepad'
+    args.destination = install_root / 'releases' / release
+    if args.destination.exists():
+        checksums = json.loads((args.destination / 'checksums.json').read_text())
+        for name, expected in checksums.items():
+            if digest(args.destination / name) != expected:
+                raise ValueError(f'Installed runtime was modified: {name}')
+    else:
+        args.destination.parent.mkdir(parents=True, exist_ok=True)
+        package(args)
+    if args.stage_only:
+        print(f'Prepared {args.destination}; rerun without --stage-only to select it')
+        return
+    apps_closed()
+    receipt = activate_managed(args.destination, args.data_dir / 'profiles/profiles.ini',
+                               install_root / 'setup-state.json')
+    print(f'Default profile: Joy-Con-Gamepad\nRuntime: {args.destination}\nRestore receipt: {receipt}')
+
+
 def restore_receipt(receipt_path):
     receipt = json.loads(receipt_path.read_text())
     target = Path(receipt['profiles_file'])
@@ -221,13 +293,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('verify')
+    s = sub.add_parser('setup')
+    s.add_argument('--build-dir', type=Path, default=ROOT / 'build/joycon-gamepad')
+    s.add_argument('--jobs', default='8')
+    s.add_argument('--openssl-root', type=Path)
+    s.add_argument('--sdl3-dir', type=Path)
+    s.add_argument('--launcher-app', type=Path, default=Path('/Applications/Minecraft Bedrock Launcher.app'))
+    s.add_argument('--data-dir', type=Path, default=Path.home() / 'Library/Application Support/mcpelauncher')
+    s.add_argument('--update-mod', type=Path)
+    s.add_argument('--stage-only', action='store_true')
     b = sub.add_parser('build')
-    b.add_argument('--build-dir', type=Path, default=ROOT / 'build/joycon')
+    b.add_argument('--build-dir', type=Path, default=ROOT / 'build/joycon-gamepad')
     b.add_argument('--jobs', default='8')
     b.add_argument('--openssl-root', type=Path)
     b.add_argument('--sdl3-dir', type=Path)
     p = sub.add_parser('package')
-    p.add_argument('--build-dir', type=Path, default=ROOT / 'build/joycon')
+    p.add_argument('--build-dir', type=Path, default=ROOT / 'build/joycon-gamepad')
     p.add_argument('--destination', type=Path, required=True)
     p.add_argument('--launcher-app', type=Path, required=True)
     p.add_argument('--update-mod', type=Path, required=True)
@@ -235,12 +316,14 @@ def main():
     a = sub.add_parser('activate')
     a.add_argument('--runtime', type=Path, required=True)
     a.add_argument('--profiles-file', type=Path, required=True)
-    a.add_argument('--name', default='Joy-Con-Keyboard-Rebuilt')
+    a.add_argument('--name', default='Joy-Con-Gamepad')
     r = sub.add_parser('restore')
     r.add_argument('--receipt', type=Path, required=True)
     args = parser.parse_args()
     if args.command == 'verify':
         verify_sources()
+    elif args.command == 'setup':
+        setup(args)
     elif args.command == 'build':
         build(args)
     elif args.command == 'package':
