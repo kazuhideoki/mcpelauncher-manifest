@@ -1,0 +1,15 @@
+[Joy-Con-Keyboard]
+arch=arm64-v8a
+commandline=\"@RUNTIME@/launch_client.sh\" %command%
+dataDir=@DATA_DIR@
+dataDirCustom=false
+env\size=0
+graphicsAPI=0
+mods\1\path=@RUNTIME@/version_metadata/
+mods\2\path=@UPDATE_MOD@/
+mods\size=2
+texturePatch=0
+version=lock 972605101
+windowCustomSize=false
+windowHeight=480
+windowWidth=720
