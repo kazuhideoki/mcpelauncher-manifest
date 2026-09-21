@@ -81,5 +81,46 @@ class LaunchArguments(unittest.TestCase):
             self.assertEqual(json.loads(log.read_text()), ['second'])
 
 
+class ManagedSetup(unittest.TestCase):
+    def setUp(self):
+        ProfileRecovery.setUp(self)
+        self.state = self.root / 'setup-state.json'
+        config = manage.parser_ini()
+        config['Joy-Con-Gamepad'] = manage.profile(self.runtime, self.data, self.root / 'single update mod')
+        (self.runtime / 'profile.fragment.ini').write_text(manage.serialize(config))
+
+    def test_repeated_setup_is_noop_and_preserves_recovery(self):
+        receipt = manage.activate_managed(self.runtime, self.profiles, self.state)
+        before = self.profiles.read_bytes()
+        self.assertEqual(manage.activate_managed(self.runtime, self.profiles, self.state), receipt)
+        self.assertEqual(self.profiles.read_bytes(), before)
+        manage.restore_receipt(receipt)
+        self.assertEqual(self.profiles.read_bytes(), self.original)
+
+    def test_upgrade_backs_up_previous_default(self):
+        manage.activate_managed(self.runtime, self.profiles, self.state)
+        before = self.profiles.read_bytes()
+        newer = self.root / 'second runtime'
+        newer.mkdir()
+        config = manage.parser_ini()
+        config['Joy-Con-Gamepad'] = manage.profile(newer, self.data, self.root / 'single update mod')
+        (newer / 'profile.fragment.ini').write_text(manage.serialize(config))
+        receipt = manage.activate_managed(newer, self.profiles, self.state)
+        self.assertNotEqual(self.profiles.read_bytes(), before)
+        manage.restore_receipt(receipt)
+        self.assertEqual(self.profiles.read_bytes(), before)
+
+    def test_setup_preserves_user_edits(self):
+        manage.activate_managed(self.runtime, self.profiles, self.state)
+        config = manage.parser_ini()
+        config.read(self.profiles)
+        config['Joy-Con-Gamepad']['windowWidth'] = '1200'
+        self.profiles.write_text(manage.serialize(config))
+        before = self.profiles.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'edited outside setup'):
+            manage.activate_managed(self.runtime, self.profiles, self.state)
+        self.assertEqual(self.profiles.read_bytes(), before)
+
+
 if __name__ == '__main__':
     unittest.main()

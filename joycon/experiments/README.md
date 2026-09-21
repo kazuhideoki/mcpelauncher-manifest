@@ -1,6 +1,9 @@
-# Joy-Conゲームパッド経路の切り分け
+# Joy-Conゲームパッド経路の切り分け（履歴）
 
-実験用。普段使うJoy-Con-Keyboardや固定ソースを置き換えない。
+これは標準採用前の調査記録。現在の標準版は[../README.md](../README.md)の`setup.sh`を使う。
+以下のパッチとビルドスクリプトは、manifest `825ef10574681d82afc17884b8f11dfec196a2c1`時点の
+初期化済みチェックアウト専用。固定依存はこのディレクトリの`source_lock.json`に保存した。
+現在の標準game-windowへ古い診断パッチを重ねて適用しない。
 
 `game-window-probe.patch`は、`source_lock.json`のgame-window
 `841c716024a63bcf25a8007a2d26199887741c09`に適用する診断パッチ。

@@ -1,154 +1,110 @@
-# macOS Joy-Con動作版の管理と再構築
+# macOS Joy-Conゲームパッド版のセットアップ
 
-このforkは、2026-09-20に動作確認したキーボード・マウス変換版v2を保存する。
-管理ブランチは`main`。公式の最新版へ一括更新せず、`source_lock.json`のコミットを使う。
+2026-09-21に操作確認したネイティブゲームパッド入力を標準にする。
+左スティックのアナログ移動、右スティックの視点、メニュー、ZL/ZRをゲームパッドとして扱う。
 
-- Minecraft：1.26.51.1 / code 972605101 / arm64-v8a
-- 普段使う既存プロファイル：Joy-Con-Keyboard
-- macOSのJoy-Con (L/R)を、ゲーム内のキーボード・マウス処理へ変換する。
-- 最終版のLAN同時プレイ、長時間動作、再起動後と再接続時の安定性は未確認。
+## ワンコマンド
 
-## 取得
+このリポジトリの`main`で実行する。
+
+```sh
+./joycon/setup.sh
+```
+
+処理内容：
+
+1. HomebrewのCMake・Python・OpenSSL・SDL3の不足分をインストール。
+2. 未取得のサブモジュールを取得し、固定コミット・変更の有無を検証。
+3. game-windowのネイティブ入力と、クライアントのJOYSTICKイベント種別修正を含めてビルド。
+4. `~/Library/Application Support/mcpelauncher/joycon-gamepad/releases/`に本体と依存ライブラリを配置。
+5. 設定をバックアップし、`Joy-Con-Gamepad`を追加または管理下の既存設定を更新して選択。
+
+配置先はリポジトリや一時worktreeの外なので、ソースの作業場所を変えても本体は残る。
+起動は通常のMinecraft Bedrock Launcherから「遊ぶ」。普段のワールド保存先を使う。
+実験版の`Diagnostic - Offline Copy`で進めた内容を元ワールドへ自動で戻す処理はしない。
+旧Joy-Con-Keyboardなど他のプロファイルは保持する。
+
+同じソース・設定で再実行できる。セットアップが管理しているプロファイルを手動で変更した場合は、
+その変更を上書きせず停止する。復旧には表示されたバックアップを使う。
+ゲームとランチャーは設定の切り替え前に保存して終了する。
+起動中なら配置まで行い、プロファイル変更前に停止するため、終了後に同じコマンドを再実行する。
+
+## 前提
+
+- Apple SiliconのMac、Homebrew、XcodeまたはCommand Line Tools。
+- `/Applications/Minecraft Bedrock Launcher.app`を導入済み。
+- 購入済みMinecraft **1.26.51.1 / code 972605101 / arm64-v8a**をランチャーでダウンロード済み。
+- 対応する更新Modが`mods/mcpelauncher-updates/1.26.45.1/arm64-v8a`に導入済み。
+
+購入・ログイン・ゲーム本体や更新Modの取得はランチャーで行う。
+コマンドはそれらを確認し、不足があれば必要な場所を表示して止まる。
+実行Modは元の1つだけ参照し、別途作るバージョンメタデータに実行ファイルは含めない。
+
+初回取得：
 
 ```sh
 ghq get https://github.com/kazuhideoki/mcpelauncher-manifest.git
 cd "$(ghq root)/github.com/kazuhideoki/mcpelauncher-manifest"
-git switch main
-git submodule sync --recursive
-git submodule update --init --recursive
-python3 joycon/manage.py verify
+./joycon/setup.sh
 ```
 
-game-windowを直接改善する場合は、`kazuhideoki/game-window`もghq配下へ取得する。
-両forkの`origin`は自分のfork、`upstream`は対応する`minecraft-linux`リポジトリとする。
-PRは自分のforkの`main`へ作り、game-windowを先にマージする。
-その後、manifestのgitlinkと`source_lock.json`を同じgame-windowコミットへ更新する。
+既存checkoutが古い場合は、変更を確認してから`main`を更新する。
+セットアップは変更済みソースをリセットしたり、上流の最新版へ自動更新したりしない。
 
-## ビルド
-
-必要なものはApple SiliconのMac、Xcode Command Line ToolsまたはXcode、Git、CMake、Python 3、Homebrewのopenssl@3とsdl3。
-必要に応じて`brew install cmake openssl@3 sdl3`で用意する。
+## 個別設定・復元
 
 ```sh
+./joycon/setup.sh --jobs 10
+./joycon/setup.sh --stage-only
+./joycon/setup.sh --launcher-app '/path/to/Minecraft Bedrock Launcher.app' \
+  --data-dir '/path/to/mcpelauncher' --update-mod '/path/to/update-mod'
+python3 joycon/manage.py restore --receipt '/path/printed/by/setup/receipt.json'
+```
+
+復元は追加後にプロファイル設定が変更されていない場合だけ実行する。
+ワールドと認証ファイルはセットアップ・復元で編集しない。
+Homebrewの依存と公式アプリは配置後も必要。アプリを移動したら新しいパスでセットアップし直す。
+
+## ビルドと変更の所在
+
+- `game-window`：fork本体にJoy-Con入力を実装。既定は`full`。
+- `joycon/client_fix.cmake`：固定された上流クライアントのソースを変更せず、ビルド先に
+  `window_callbacks.cpp`を生成し、MotionEventの種別だけをGAMEPADからJOYSTICKへ変更してコンパイル。
+  想定した置換箇所が1つでなければ停止する。
+- `source_lock.json`：固定した33サブモジュール。game-windowのgitlinkと同じコミットを記録する。
+- `build/joycon-gamepad/joycon_build_report.json`：本体・修正処理のSHA-256、ソース固定情報、ビルド環境。
+- `joycon-gamepad/setup-state.json`と各releaseの`profile_backups/`：管理対象と復元情報。
+
+```sh
+python3 joycon/manage.py verify
 python3 joycon/manage.py build --jobs 10
-```
-
-出力は`build/joycon/mcpelauncher-client/mcpelauncher-client`。
-環境・コミット・本体のSHA-256は、非追跡ファイル`build/joycon/joycon_build_report.json`に記録する。
-`--build-dir`、`--openssl-root`、`--sdl3-dir`で環境固有のパスを指定できる。
-
-元の記録と同じGLFW、RelWithDebInfo、macOS deployment target 11.0を使う。
-`ENABLE_DEV_PATHS`だけはOFFにして、ビルド元の一時ディレクトリへ依存するフォールバックを除く。
-実行に必要なネイティブライブラリは、配置時に本体の隣へコピーする。
-
-依存ソースのコミットは固定する。Homebrewのライブラリ、Xcode、macOS SDKは実環境を利用するため、バイナリの完全一致を保証しない。
-現在のHomebrewバイナリはmacOS 26向けであり、deployment target 11.0を指定してもmacOS 11で動くという意味ではない。
-GLFWの取得URLは元のCMakeでコミット固定されている。初回はネットワーク接続が必要。
-
-macOSの大文字小文字を区別しないディスクでは、bionicのLinuxヘッダー8組が衝突する。
-検証スクリプトは、衝突先の内容が同じコミット内の対応するGit blobと一致する場合だけ許容する。
-その他の追跡ファイルの変更と、コミットのずれは検証で拒否する。
-
-## 別の場所へ配置する
-
-以下の変数は自分の環境に合わせる。`runtime`は**存在しない新しいディレクトリ**にする。
-この操作は既存のランチャー設定・認証情報・ワールドを書き換えない。
-
-```sh
-launcher_app='/Applications/Minecraft Bedrock Launcher.app'
-data_dir="$HOME/Library/Application Support/mcpelauncher"
-update_mod="$data_dir/mods/mcpelauncher-updates/1.26.45.1/arm64-v8a"
-runtime="$PWD/.local/joycon_candidate"
-python3 joycon/manage.py package \
-  --destination "$runtime" \
-  --launcher-app "$launcher_app" \
-  --data-dir "$data_dir" \
-  --update-mod "$update_mod"
-```
-
-`package`は以下を作成する。
-
-- ビルドした本体、起動スクリプト、ネイティブ補助ライブラリ。
-- 公式ランチャーのFrameworks・Resources・補助アプリへのリンク。
-- 対応情報だけの`version_metadata/mod.json`。
-- 個人のパスを埋めた非公開の`profile.fragment.ini`とチェックサム。
-- ビルド情報とライセンス表記。
-
-ゲーム本体、ワールド、認証情報、更新Modの実行ファイルはコピーしない。
-更新Modは指定した元ディレクトリの1つだけを参照する。
-公式ランチャーを移動・削除した場合は、リンク先を再設定して配置し直す。
-生成された実行環境は`.local/`等の非追跡領域へ置き、配布物としてpushしない。
-
-## 普段の環境への切り替えと復元
-
-**今回はビルド・別配置までを検証し、既存環境への切り替えは実施していない。**
-切り替えるときはMinecraftを保存して終了し、ゲーム本体とランチャーの両方を閉じる。
-既存のJoy-Con-Keyboardを上書きせず、新しいプロファイルを追加する。
-
-```sh
-python3 joycon/manage.py activate \
-  --runtime "$runtime" \
-  --profiles-file "$data_dir/profiles/profiles.ini" \
-  --name Joy-Con-Keyboard-Rebuilt
-```
-
-同じ名前のプロファイルがある場合は拒否する。
-元の設定のバックアップと`receipt.json`をruntime内の`profile_backups/`へ保存する。
-表示されたreceiptを指定すれば、元の選択と設定へ戻せる。
-
-```sh
-python3 joycon/manage.py restore --receipt '/path/to/profile_backups/activation_xxx/receipt.json'
-```
-
-復元は、追加後にプロファイル設定が変更されていない場合だけ実行する。
-途中で別の変更をした場合は上書きせず停止する。バックアップとの差分を手動で確認する。
-ワールドと認証情報は、追加・復元のどちらでも編集しない。
-
-## 操作配置
-
-| 入力 | 操作 |
-| --- | --- |
-| 左スティック | WASD移動。歩行速度はデジタル |
-| 右スティック | 視点1300入力ピクセル/秒、メニューのカーソル650 |
-| 十字キー上・左・右・下 | 視点切替・エモート・チャット・アイテムを落とす |
-| メニュー中の十字キー | 矢印キー |
-| ZR / ZL | 攻撃・破壊 / 使用・設置 |
-| L / R | 前 / 次の持ち物 |
-| ＋ / − | Escape / Tab |
-| 左スティック押し込み | Ctrlでダッシュ |
-
-Appleの論理Aはジャンプ／メニュークリック、Bはしゃがみ／戻る、Xはインベントリ、Yはアイテムを落とす。
-Nintendoの物理ボタン表記との対応は別途確認が必要。
-視点移動の端数を蓄積する。デッドゾーン0.15、移動のしきい値0.25、フレーム時間の上限50ms。
-ゲーム側のマウス感度も視点速度へ影響する。
-
-## 調査経緯と禁止する退行
-
-1. macOSは左右のJoy-Conを認識したが、元のゲームパッド経路では操作できなかった。
-2. DYLDで補助ライブラリを挿入する試作は、再起動後の停止を繰り返した。採用しない。
-3. Apple入力をAndroidゲームパッドとして登録する試作は、一時的に動いたがワールドを開くと落ちた。
-4. LAN参加の試行後にも問題が起きた。オフラインコピーでも同じSIGSEGVを再現し、通信だけが原因とはいえなかった。
-5. 同じワールドを改造前の本体では開けた。キーボード・マウス変換版でも開けて操作できた。
-6. v2で視点速度と十字キーを調整し、操作確認を得た。内部の正確なクラッシュ原因は未特定。
-7. 別件として、更新Modを2つ読み込んだ構成では初期化が停止した。現在は対応情報のみと実行Mod1つを使う。
-
-起動時の対応バージョン判定が古い場合は、バージョンコード固定と専用メタデータを確認する。
-「Activate」という案内だけを根拠に、更新Modを重ねて有効化しない。
-生ログには認証情報や識別子を含む場合があるため、コミット・pushしない。
-
-## 検証と今後の改善
-
-```sh
 python3 -m unittest discover -s joycon/tests -v
-shellcheck joycon/launch_client.sh
-shfmt -d joycon/launch_client.sh
-python3 joycon/manage.py verify
+shellcheck joycon/setup.sh joycon/launch_client.sh
+shfmt -d joycon/setup.sh joycon/launch_client.sh
 ```
 
-テストは一時ディレクトリで実行し、実際のプロファイルを編集しない。
-ソース移管時のビルド・配置結果は[VALIDATION.md](VALIDATION.md)を参照。
-今後はgame-windowで変更し、manifestの参照コミットを更新してビルドする。
-入力改善と実機確認は小さく分け、動作版とワールドを残す。
+macOSの大文字小文字を区別しないディスクでは、bionicのヘッダー8組が衝突する。
+固定Git blobとの一致を確認できる場合だけ許容する。
+Homebrew・Xcode・SDKは実環境を使うため、バイナリの完全一致は保証しない。
+deployment target 11.0を指定しても、現在のHomebrewライブラリがmacOS 11で動くという意味ではない。
 
-元のライセンスは各リポジトリ・サブモジュール内に保持する。
-Minecraft本体、認証情報、ワールド、生ログ、個人設定、依存ライブラリのバイナリはこのforkへ追加しない。
+変更は自分のforkの`main`へPRを作成する。game-windowを先にマージし、manifestのgitlinkとロックを更新する。
+この2つのforkで管理し、クライアントの上流checkoutを直接変更しない。
+
+## 操作と既知の制約
+
+基本操作はMinecraftのコントローラー設定に従う。ボタン表記・感度はゲーム内で設定する。
+左右セットのJoy-Con (L/R)を1台として扱い、GLFW経由のゲームパッド登録は無効にして重複入力を避ける。
+他のゲームパッドとの共存は未確認。
+
+キーボード変換に戻す場合は、旧Joy-Con-Keyboardを選ぶか、プロファイルの環境変数に
+`MCPELAUNCHER_JOYCON_MODE=keyboard`を設定する。
+以前のDYLD挿入ライブラリは使用しない。
+
+操作確認はメニュー、検証用ワールド読み込み、左右スティック、ZL/ZR。
+長時間・再起動・LAN・再接続は未確認。切断時の解放と、マウスとの入力切替直後の
+ボタン取りこぼしは既知の制約として残る。詳細は[独立レビュー](experiments/REVIEW.md)。
+標準版への選択はユーザーの操作確認と指定に基づくもので、これらの未確認項目が解消したという意味ではない。
+
+過去の移管記録は[VALIDATION.md](VALIDATION.md)、原因切り分けは[実験記録](experiments/README.md)。
+本体・依存バイナリ・ワールド・認証情報・個人設定・生ログはコミットやpushをしない。
