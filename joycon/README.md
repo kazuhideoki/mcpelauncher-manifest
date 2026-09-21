@@ -1,7 +1,7 @@
 # macOS Joy-Con動作版の管理と再構築
 
 このforkは、2026-09-20に動作確認したキーボード・マウス変換版v2を保存する。
-管理ブランチは`joycon-stable`。公式の最新版へ一括更新せず、`source_lock.json`のコミットを使う。
+管理ブランチは`main`。公式の最新版へ一括更新せず、`source_lock.json`のコミットを使う。
 
 - Minecraft：1.26.51.1 / code 972605101 / arm64-v8a
 - 普段使う既存プロファイル：Joy-Con-Keyboard
@@ -13,7 +13,7 @@
 ```sh
 ghq get https://github.com/kazuhideoki/mcpelauncher-manifest.git
 cd "$(ghq root)/github.com/kazuhideoki/mcpelauncher-manifest"
-git switch joycon-stable
+git switch main
 git submodule sync --recursive
 git submodule update --init --recursive
 python3 joycon/manage.py verify
@@ -21,7 +21,7 @@ python3 joycon/manage.py verify
 
 game-windowを直接改善する場合は、`kazuhideoki/game-window`もghq配下へ取得する。
 両forkの`origin`は自分のfork、`upstream`は対応する`minecraft-linux`リポジトリとする。
-PRは自分のforkの`joycon-stable`へ作り、game-windowを先にマージする。
+PRは自分のforkの`main`へ作り、game-windowを先にマージする。
 その後、manifestのgitlinkと`source_lock.json`を同じgame-windowコミットへ更新する。
 
 ## ビルド
