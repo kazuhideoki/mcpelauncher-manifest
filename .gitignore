@@ -4,3 +4,15 @@ cmake-build-debug-clang
 cmake-build-release
 cmake-build-release-clang
 .idea
+
+# Local Joy-Con build, runtime, configuration and diagnostic artifacts
+/.local/
+/build/
+**/__pycache__/
+*.log
+*.ips
+*.apk
+*.mcworld
+*.tar.gz
+profiles*.ini
+!joycon/templates/profile.ini.in

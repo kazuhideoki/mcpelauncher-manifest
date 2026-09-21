@@ -1,3 +1,7 @@
+# Personal Joy-Con build
+
+See [joycon/README.md](joycon/README.md) for the pinned macOS build, controls, installation and recovery workflow. The upstream README follows.
+
 # mcpelauncher
 
 An unstable unofficial launcher for the Android version of Minecraft: Bedrock Edition on linux and macOS.
