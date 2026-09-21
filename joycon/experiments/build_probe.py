@@ -15,6 +15,24 @@ def run(*args, **kwargs):
     subprocess.run([str(a) for a in args], check=True, **kwargs)
 
 
+def copy_sources(source, destination):
+    # Android's pinned sources contain dangling links to files outside the tree.
+    # Preserve links exactly instead of dereferencing them while copying.
+    shutil.copytree(source, destination, symlinks=True,
+                    ignore=shutil.ignore_patterns('.git', 'build', '.local', '__pycache__'))
+
+
+def cached_dependency_options(deps):
+    options = []
+    for dep, required in (('glfw3_ext', 'CMakeLists.txt'),
+                          ('nlohmann_json_ext', 'include/nlohmann/json.hpp')):
+        path = deps.resolve() / (dep + '-src')
+        if not (path / required).is_file():
+            raise ValueError(f'Missing cached dependency: {path / required}')
+        options.append(f'-DFETCHCONTENT_SOURCE_DIR_{dep.upper()}={path}')
+    return options
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', required=True, type=Path,
@@ -31,10 +49,14 @@ def main():
         parser.error('Source lock differs from the recorded baseline')
     if dest.exists() or source == dest or source in dest.parents:
         parser.error('Destination must be NEW and outside the source checkout')
+    try:
+        dependency_options = cached_dependency_options(args.cached_deps) if args.cached_deps else []
+    except ValueError as exc:
+        parser.error(str(exc))
     run(sys.executable, source / 'joycon/manage.py', 'verify')
     dest.mkdir(parents=True)
     copied = dest / 'source'
-    shutil.copytree(source, copied, ignore=shutil.ignore_patterns('.git', 'build', '.local', '__pycache__'))
+    copy_sources(source, copied)
     patches = [('game-window', 'game-window-probe.patch'),
                ('mcpelauncher-client', 'client-joystick-source.patch')]
     for module, patch in patches:
@@ -49,13 +71,7 @@ def main():
                  '-DCMAKE_EXE_LINKER_FLAGS=-framework AppKit', '-DENABLE_DEV_PATHS=OFF',
                  '-DSDL3_VENDORED=OFF', '-DUSE_GAMECONTROLLERDB=OFF',
                  f'-DOPENSSL_ROOT_DIR={openssl}', f'-DSDL3_DIR={sdl}/lib/cmake/SDL3']
-    if args.cached_deps:
-        deps = args.cached_deps.resolve()
-        for dep in ('glfw3_ext', 'nlohmann_json_ext'):
-            path = deps / (dep + '-src')
-            if not (path / 'CMakeLists.txt').is_file():
-                parser.error(f'Missing cached dependency: {path}')
-            configure.append(f'-DFETCHCONTENT_SOURCE_DIR_{dep.upper()}={path}')
+    configure.extend(dependency_options)
     run(*configure)
     run('cmake', '--build', dest / 'build', '--target', 'mcpelauncher-client', '-j', args.jobs)
     binary = dest / 'build/mcpelauncher-client/mcpelauncher-client'
