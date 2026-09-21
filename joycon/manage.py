@@ -187,8 +187,7 @@ def apply_profile(runtime, profiles_file, name, expected_entry=None):
         raise ValueError('Profile already exists; choose a NEW profile name')
     fragment = parser_ini()
     fragment.read(runtime / 'profile.fragment.ini')
-    section = 'Joy-Con-Gamepad' if 'Joy-Con-Gamepad' in fragment else 'Joy-Con-Keyboard'
-    entry = dict(fragment[section])
+    entry = dict(fragment['Joy-Con-Gamepad'])
     if Path(entry['dataDir']).resolve() != profiles_file.parent.parent:
         raise ValueError('Profile dataDir must match the launcher data directory')
     receipts = runtime / 'profile_backups'
