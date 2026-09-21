@@ -25,16 +25,16 @@ class ProfileRecovery(unittest.TestCase):
         self.original = b'; keep original formatting\r\n[General]\r\nselected=Existing\r\n\r\n[Existing]\r\ncustom=value\r\n'
         self.profiles.write_bytes(self.original)
         config = manage.parser_ini()
-        config['Joy-Con-Keyboard'] = manage.profile(self.runtime, self.data, self.root / 'single update mod')
+        config['Joy-Con-Gamepad'] = manage.profile(self.runtime, self.data, self.root / 'single update mod')
         (self.runtime / 'profile.fragment.ini').write_text(manage.serialize(config))
 
     def test_activation_preserves_other_profile_and_restores_exact_bytes(self):
-        receipt = manage.apply_profile(self.runtime, self.profiles, 'Test-Keyboard')
+        receipt = manage.apply_profile(self.runtime, self.profiles, 'Test-Gamepad')
         config = manage.parser_ini()
         config.read(self.profiles)
         self.assertEqual(config['Existing']['custom'], 'value')
-        self.assertEqual(config['General']['selected'], 'Test-Keyboard')
-        self.assertEqual(config['Test-Keyboard']['version'], 'lock 972605101')
+        self.assertEqual(config['General']['selected'], 'Test-Gamepad')
+        self.assertEqual(config['Test-Gamepad']['version'], 'lock 972605101')
         manage.restore_receipt(receipt)
         self.assertEqual(self.profiles.read_bytes(), self.original)
 
@@ -44,7 +44,7 @@ class ProfileRecovery(unittest.TestCase):
         self.assertEqual(self.profiles.read_bytes(), self.original)
 
     def test_restore_refuses_newer_user_edits(self):
-        receipt = manage.apply_profile(self.runtime, self.profiles, 'Test-Keyboard')
+        receipt = manage.apply_profile(self.runtime, self.profiles, 'Test-Gamepad')
         with self.profiles.open('a') as stream:
             stream.write('\n[user_edit]\nkeep=yes\n')
         changed = self.profiles.read_bytes()
